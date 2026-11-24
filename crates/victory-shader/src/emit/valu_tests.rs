@@ -871,6 +871,8 @@ fn bfe_signed_and_unsigned_match_rdna2() {
     let v_unsigned = build_valu_cs(&vop3(0x148, 0, vgpr(1), vgpr(2), vgpr(3)));
     // s_bfe_i32 s6, s0, s1 (SOP2 opcode 0x28: s1 = off[4:0] | width[22:16]); v_mov_b32 v0, s6
     let s_signed = build_valu_cs(&[sop2(0x28, 6, 0, 1), vop1(0x001, 0, sgpr(6))]);
+    // s_bfe_u32 s6, s0, s1 (SOP2 opcode 0x27); v_mov_b32 v0, s6
+    let s_unsigned = build_valu_cs(&[sop2(0x27, 6, 0, 1), vop1(0x001, 0, sgpr(6))]);
 
     let signed_cases: &[([u32; 4], u32)] = &[
         // Field crosses bit 31: extends from bit 31.
@@ -932,6 +934,22 @@ fn bfe_signed_and_unsigned_match_rdna2() {
             got, want,
             "{backend}: v_bfe_u32({:#010x}, {}, {}) = {got:#010x}, want {want:#010x}",
             inp[0], inp[1], inp[2],
+        );
+    });
+
+    // s_bfe_u32 width is 7-bit (src1[22:16]), so width=32 keeps all remaining bits without sign extension.
+    let mut su_cases = unsigned_cases.to_vec();
+    su_cases.push(([0x8000_0000, 4, 32, 0], 0x0800_0000));
+    let su_in: Vec<[u32; 4]> = su_cases
+        .iter()
+        .map(|&(inp, _)| [inp[0], (inp[1] & 31) | ((inp[2] & 0x7F) << 16), 0, 0])
+        .collect();
+    run_cases(&s_unsigned, &su_in, |backend, i, inp, got| {
+        let want = su_cases[i].1;
+        assert_eq!(
+            got, want,
+            "{backend}: s_bfe_u32({:#010x}, {:#010x}) = {got:#010x}, want {want:#010x}",
+            inp[0], inp[1],
         );
     });
 }
@@ -1352,4 +1370,49 @@ fn v_med3_min3_max3_integer_matches_rdna2() {
     check("v_min3_u32", &min3_u, |c| c.4);
     check("v_max3_u32", &max3_u, |c| c.5);
     check("v_med3_u32", &med3_u, |c| c.6);
+}
+
+#[test]
+fn v_cmp_class_f32_matches_rdna2() {
+    // v_cmp_class_f32_e64 s6, v1, v2 (VOP3 encoding of VOPC 0x088)
+    // v_cndmask_b32_e64 v0, 0, 1, s6
+    let cmp = build_valu_cs(&[
+        vop3(0x088, 6, vgpr(1), vgpr(2), 0)[0],
+        vop3(0x088, 6, vgpr(1), vgpr(2), 0)[1],
+        vop3(0x101, 0, 0x80, 0x81, sgpr(6))[0],
+        vop3(0x101, 0, 0x80, 0x81, sgpr(6))[1],
+    ]);
+
+    // All 10 IEEE-754 binary32 classes: bit k corresponds to class k.
+    let classes: &[(u32, u32)] = &[
+        (0x7F80_0001, 0), // +sNaN (quiet bit 0x40_0000 clear)
+        (0xFFBF_FFFF, 0), // -sNaN
+        (0x7FC0_0000, 1), // +qNaN (quiet bit set)
+        (0xFFC0_0001, 1), // -qNaN
+        (0xFF80_0000, 2), // -inf
+        (0xBF80_0000, 3), // -normal (-1.0)
+        (0x8000_0001, 4), // -denormal
+        (0x8000_0000, 5), // -0.0
+        (0x0000_0000, 6), // +0.0
+        (0x0000_0001, 7), // +denormal
+        (0x3F80_0000, 8), // +normal (+1.0)
+        (0x7F80_0000, 9), // +inf
+    ];
+    let mut cases = Vec::new();
+    for &(bits, cls) in classes {
+        cases.push(([bits, 1u32 << cls, 0, 0], 1u32));
+        cases.push(([bits, 0x3FF & !(1u32 << cls), 0, 0], 0u32));
+    }
+    cases.push(([0x3F80_0000, 0, 0, 0], 0u32));
+    cases.push(([0x3F80_0000, 0xFFFF_FC00, 0, 0], 0u32));
+
+    let inputs: Vec<[u32; 4]> = cases.iter().map(|c| c.0).collect();
+    run_cases(&cmp, &inputs, |backend, i, inp, got| {
+        let want = cases[i].1;
+        assert_eq!(
+            got, want,
+            "{backend}: v_cmp_class_f32({:#010x}, {:#05x}) = {got}, want {want}",
+            inp[0], inp[1],
+        );
+    });
 }
