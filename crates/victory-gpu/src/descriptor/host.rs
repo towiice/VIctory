@@ -141,8 +141,14 @@ impl HostHeap {
                 Err(e) if count + MIN_DYNAMIC > PORTABLE_VIEWS => {
                     // shortcut: descriptors past the host's limit are left
                     // out; a title that reaches them needs remapping.
+                    // Reserve two slots at the top (`NULL_BUFFER_VIEW - 1`
+                    // and `NULL_BUFFER_VIEW`) for the null buffer UAV/SRV.
                     tracing::warn!(error = %e, count, "host view heap capped at {PORTABLE_VIEWS}");
-                    (make(PORTABLE_VIEWS).ok()?, PORTABLE_VIEWS - MIN_DYNAMIC, MIN_DYNAMIC)
+                    (
+                        make(PORTABLE_VIEWS).ok()?,
+                        PORTABLE_VIEWS - MIN_DYNAMIC - 2,
+                        MIN_DYNAMIC,
+                    )
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, count, sampler, "no host descriptor heap");
@@ -180,7 +186,7 @@ impl HostHeap {
             next: Mutex::new((0, vec![false; extra as usize])),
             pairs: Mutex::new((count + extra, Vec::new())),
             pairs_end: match victory_shader::emit::NULL_BUFFER_VIEW {
-                null if !sampler && null > count + extra && null < total => null - 1,
+                null if !sampler && null >= count + extra + 1 && null < total => null - 1,
                 _ => total,
             },
             strides,
@@ -203,7 +209,7 @@ impl HostHeap {
         // they take one at a computed index (`victory_shader::emit`, "Buffer
         // views at computed heap indices"): a null raw SRV, and UAV below it.
         let null = victory_shader::emit::NULL_BUFFER_VIEW;
-        if !sampler && null > count + extra && null < total {
+        if !sampler && null >= count + extra + 1 && null < total {
             h.raw_view_at(null, None, 0, 0, false);
             h.raw_view_at(null - 1, None, 0, 0, true);
         } else if !sampler {
@@ -862,6 +868,22 @@ fn buffer_srv(
         once!(first, count, element, "buffer view empty or past its host copy");
         return None;
     }
+    // All buffer SRVs are read as raw `ByteAddressBuffer` (`rawBufferLoad`
+    // with byte offsets) by translated shaders; on NVIDIA D3D12 hardware,
+    // `rawBufferLoad` on a structured SRV (`Format = DXGI_FORMAT_UNKNOWN,
+    // StructureByteStride = s`) multiplies the byte offset by `s` a second
+    // time. Create the host descriptor as a raw `R32_TYPELESS` buffer SRV
+    // spanning the same byte range (`first * element .. (first + count) * element`).
+    let byte_start = first * element;
+    let byte_len = u64::from(count) * element;
+    let raw_first = byte_start / 4;
+    let raw_end = byte_start.saturating_add(byte_len).div_ceil(4);
+    let raw_count = raw_end.saturating_sub(raw_first).min(u64::from(u32::MAX)) as u32;
+    desc.Format = DXGI_FORMAT_R32_TYPELESS;
+    buffer.FirstElement = raw_first;
+    buffer.NumElements = raw_count;
+    buffer.StructureByteStride = 0;
+    buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
     let host = host()?;
     // SAFETY: a live buffer and a slot of our heap.
     unsafe {

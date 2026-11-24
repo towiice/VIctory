@@ -1353,7 +1353,7 @@ impl Host {
                 Ok(b)
             };
             let slots = match d.views.last() {
-                Some(View::NullBuffers) => (super::NULL_BUFFER_VIEW + 2) as usize,
+                Some(View::NullBuffers) => super::HEAP_VIEWS as usize,
                 _ => d.views.len(),
             };
             let views = heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, slots)?;
@@ -1580,7 +1580,7 @@ impl Host {
                     View::Buffer { data, stride } => {
                         let b = upload(data)?;
                         let (format, elements, stride, flags) = match stride {
-                            Stride::Raw => (
+                            Stride::Raw | Stride::Structured(_) => (
                                 DXGI_FORMAT_R32_TYPELESS,
                                 data.len(),
                                 0,
@@ -1590,12 +1590,6 @@ impl Host {
                                 DXGI_FORMAT_R32G32B32A32_FLOAT,
                                 data.len() / 4,
                                 0,
-                                D3D12_BUFFER_SRV_FLAG_NONE,
-                            ),
-                            Stride::Structured(s) => (
-                                DXGI_FORMAT_UNKNOWN,
-                                data.len() * 4 / s as usize,
-                                s,
                                 D3D12_BUFFER_SRV_FLAG_NONE,
                             ),
                             Stride::Format(f, bytes) => (

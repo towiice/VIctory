@@ -21,14 +21,15 @@ pub const VIEW_STRIDES: u8 = 255;
 pub const MEMORY_SPACE: u32 = 2;
 /// Heap indices are clamped below these (views, samplers): the host's heaps
 /// are at least this large, the slots past their own null (`emit`, "Heap
-/// indices").
-pub const HEAP_VIEWS: u32 = 1 << 21;
+/// indices"). Kept at 1,000,000 so the clamp and the null buffer views fit
+/// inside NVIDIA's 1,000,000 shader-visible `CBV_SRV_UAV` heap cap.
+pub const HEAP_VIEWS: u32 = 1_000_000;
 pub const HEAP_SAMPLERS: u32 = 2048;
 /// The heap index of the host's null raw buffer view (the null raw
 /// unordered access view at the index below), read instead of a slot that
 /// holds no buffer view where a shader reads one at an index it computes
 /// (`emit`, "Buffer views at computed heap indices").
-pub const NULL_BUFFER_VIEW: u32 = 1_000_000 - 2;
+pub const NULL_BUFFER_VIEW: u32 = HEAP_VIEWS - 2;
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
