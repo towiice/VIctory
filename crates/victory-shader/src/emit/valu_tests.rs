@@ -380,6 +380,27 @@ fn max_and_min_order_negative_zero_below_positive_zero() {
             assert_eq!(got, want, "{backend}: {name} {inp:x?}");
         });
     }
+
+    // f16: -0 = 0x8000, +0 = 0x0000. Low 16 bits hold the f16 result.
+    let (pz16, nz16) = (0x0000_u32, 0x8000_u32);
+    let cases16 = [
+        [nz16, pz16, nz16, 0],
+        [pz16, nz16, nz16, 0],
+        [nz16, pz16, pz16, 0],
+        [pz16, nz16, pz16, 0],
+    ];
+    let ops16 = [
+        ("v_max_f16", 0x139, pz16),
+        ("v_min_f16", 0x13A, nz16),
+        ("v_max3_f16", 0x354, pz16),
+        ("v_min3_f16", 0x351, nz16),
+    ];
+    for (name, op, want) in ops16 {
+        let shader = build_valu_cs(&vop3(op, 0, vgpr(1), vgpr(2), vgpr(3)));
+        run_cases(&shader, &cases16, |backend, _, inp, got| {
+            assert_eq!(got & 0xFFFF, want, "{backend}: {name} {inp:x?}");
+        });
+    }
 }
 
 #[test]
@@ -1263,4 +1284,72 @@ fn v_cmp_class_f16_matches_rdna2() {
             inp[0], inp[1],
         );
     });
+}
+
+#[test]
+fn v_med3_min3_max3_integer_matches_rdna2() {
+    let make = |op: u16| build_valu_cs(&vop3(op, 0, vgpr(1), vgpr(2), vgpr(3)));
+
+    let min3_i = make(0x152); // v_min3_i32
+    let min3_u = make(0x153); // v_min3_u32
+    let max3_i = make(0x155); // v_max3_i32
+    let max3_u = make(0x156); // v_max3_u32
+    let med3_i = make(0x158); // v_med3_i32
+    let med3_u = make(0x159); // v_med3_u32
+
+    // (inputs [a, b, c, 0], min_i32, max_i32, med_i32, min_u32, max_u32, med_u32)
+    let cases: &[([u32; 4], u32, u32, u32, u32, u32, u32)] = &[
+        // Plain ascending order
+        ([1, 2, 3, 0], 1, 3, 2, 1, 3, 2),
+        // Reversed
+        ([3, 2, 1, 0], 1, 3, 2, 1, 3, 2),
+        // All equal
+        ([7, 7, 7, 0], 7, 7, 7, 7, 7, 7),
+        // Two equal (low)
+        ([1, 1, 5, 0], 1, 5, 1, 1, 5, 1),
+        // Two equal (high)
+        ([5, 9, 9, 0], 5, 9, 9, 5, 9, 9),
+        // Signed vs unsigned with negative numbers
+        (
+            [(-3i32) as u32, (-1i32) as u32, 2, 0],
+            (-3i32) as u32,
+            2,
+            (-1i32) as u32,
+            2,
+            (-1i32) as u32,
+            (-3i32) as u32,
+        ),
+        // Signed extremes
+        (
+            [0x8000_0000, 0x7FFF_FFFF, 0, 0],
+            0x8000_0000,
+            0x7FFF_FFFF,
+            0,
+            0,
+            0x8000_0000,
+            0x7FFF_FFFF,
+        ),
+    ];
+
+    let inputs: Vec<[u32; 4]> = cases.iter().map(|c| c.0).collect();
+
+    let check = |name: &str,
+                 shader: &HostShader,
+                 extract: fn(&([u32; 4], u32, u32, u32, u32, u32, u32)) -> u32| {
+        run_cases(shader, &inputs, |backend, i, inp, got| {
+            let want = extract(&cases[i]);
+            assert_eq!(
+                got, want,
+                "{backend}: {name}({:#010x}, {:#010x}, {:#010x}) = {got:#010x}, want {want:#010x}",
+                inp[0], inp[1], inp[2]
+            );
+        });
+    };
+
+    check("v_min3_i32", &min3_i, |c| c.1);
+    check("v_max3_i32", &max3_i, |c| c.2);
+    check("v_med3_i32", &med3_i, |c| c.3);
+    check("v_min3_u32", &min3_u, |c| c.4);
+    check("v_max3_u32", &max3_u, |c| c.5);
+    check("v_med3_u32", &med3_u, |c| c.6);
 }
