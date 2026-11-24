@@ -1353,7 +1353,7 @@ impl Host {
                 Ok(b)
             };
             let slots = match d.views.last() {
-                Some(View::NullBuffers) => super::HEAP_VIEWS as usize,
+                Some(View::NullBuffers) => (super::NULL_BUFFER_VIEW + 2) as usize,
                 _ => d.views.len(),
             };
             let views = heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, slots)?;

@@ -28,7 +28,7 @@ pub const HEAP_SAMPLERS: u32 = 2048;
 /// unordered access view at the index below), read instead of a slot that
 /// holds no buffer view where a shader reads one at an index it computes
 /// (`emit`, "Buffer views at computed heap indices").
-pub const NULL_BUFFER_VIEW: u32 = HEAP_VIEWS - 2;
+pub const NULL_BUFFER_VIEW: u32 = 1_000_000 - 2;
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {

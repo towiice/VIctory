@@ -207,7 +207,7 @@ fn gathers_at_a_level_match_the_hardware() {
         View::Mipped(24, 16, 4, &texels),
         View::Buffer {
             data: &input,
-            stride: Stride::Structured(16),
+            stride: Stride::Raw,
         },
         View::RawUav(32 * 12),
     ];
